@@ -1,0 +1,76 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *"  # 每天凌晨 2 点执行全量扫描
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: "执行的阶段 (dependency,sast,dast,mobile)"
+        required: false
+        default: "dependency,sast,mobile"
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: Checkout AboutSecurity 知识库
+        uses: actions/checkout@v4
+        with:
+          repository: wgpsec/AboutSecurity
+          path: ./aboutsecurity
+          sparse-checkout: |
+            skills/
+            Vuln/
+            Payload/
+            Dic/
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 执行安全扫描
+        uses: ./
+        with:
+          project-root: "."
+          aboutsecurity-path: "./aboutsecurity"
+          stages: ${{ github.event.inputs.stages || 'dependency,sast,mobile' }}
+          fail-on-critical: "true"
+
+      - name: 检查报告
+        if: always()
+        run: |
+          REPORT=$(ls -t security-reports/security-report-*.md 2>/dev/null | head -1)
+          if [ -n "$REPORT" ]; then
+            echo "## 安全扫描报告" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat "$REPORT" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 创建 Issue（严重漏洞）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPORT=$(ls -t security-reports/security-report-*.md 2>/dev/null | head -1)
+          if [ -n "$REPORT" ]; then
+            # 提取严重/高危漏洞数量
+            CRITICAL=$(grep -c "CRITICAL" "$REPORT" || echo "0")
+            HIGH=$(grep -c "HIGH" "$REPORT" || echo "0")
+            gh issue create \
+              --title "[Security] 安全扫描发现 ${CRITICAL} 个严重 + ${HIGH} 个高危漏洞" \
+              --body-file "$REPORT" \
+              --label "security" || true
+          fi

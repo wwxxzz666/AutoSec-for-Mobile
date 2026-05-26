@@ -1,0 +1,96 @@
+name: "MobileSec Security Scanner"
+description: "移动应用安全扫描 Agent - 基于 AboutSecurity 知识库"
+author: "MobileSec"
+
+inputs:
+  project-root:
+    description: "项目根目录"
+    required: false
+    default: "."
+  config-path:
+    description: "配置文件路径"
+    required: false
+    default: ".mobilesec/config.yaml"
+  aboutsecurity-path:
+    description: "AboutSecurity 知识库路径"
+    required: false
+    default: ""
+  stages:
+    description: "要执行的阶段 (逗号分隔: dependency,sast,dast,mobile)"
+    required: false
+    default: "dependency,sast,mobile"
+  output-dir:
+    description: "报告输出目录"
+    required: false
+    default: "./security-reports"
+  fail-on-critical:
+    description: "发现严重漏洞时是否失败"
+    required: false
+    default: "true"
+
+outputs:
+  report-path:
+    description: "生成的报告文件路径"
+    value: ${{ steps.scan.outputs.report_path }}
+  total-findings:
+    description: "发现的安全问题总数"
+    value: ${{ steps.scan.outputs.total_findings }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: 安装 Python 依赖
+      shell: bash
+      run: |
+        pip install semgrep bandit trivy-pip 2>/dev/null || true
+        pip install -e ${{ github.action_path }} 2>/dev/null || pip install pyyaml pydantic rich jinja2
+
+    - name: 安装安全工具
+      shell: bash
+      run: |
+        # 安装 Trivy
+        if ! command -v trivy &> /dev/null; then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        fi
+        # 安装 Nuclei (可选)
+        if ! command -v nuclei &> /dev/null; then
+          curl -sL https://github.com/projectdiscovery/nuclei/releases/download/v3.3.7/nuclei_3.3.7_linux_amd64.zip -o nuclei.zip
+          unzip -o nuclei.zip -d /usr/local/bin nuclei 2>/dev/null || true
+          rm -f nuclei.zip
+        fi
+
+    - name: 执行安全扫描
+      id: scan
+      shell: bash
+      run: |
+        ARGS="--project-root ${{ inputs.project-root }}"
+        ARGS="$ARGS --config ${{ inputs.config-path }}"
+        ARGS="$ARGS --stages ${{ inputs.stages }}"
+        ARGS="$ARGS --output ${{ inputs.output-dir }}"
+
+        if [ -n "${{ inputs.aboutsecurity-path }}" ]; then
+          ARGS="$ARGS --aboutsecurity-path ${{ inputs.aboutsecurity-path }}"
+        fi
+
+        if python -m mobilesec.cli $ARGS; then
+          echo "scan_result=success" >> $GITHUB_OUTPUT
+        else
+          if [ "${{ inputs.fail-on-critical }}" = "true" ]; then
+            echo "::error::发现严重或高危漏洞，请查看安全报告"
+            exit 1
+          else
+            echo "::warning::发现严重或高危漏洞，请查看安全报告"
+          fi
+        fi
+
+        # 输出报告路径
+        REPORT=$(ls -t ${{ inputs.output-dir }}/security-report-*.md 2>/dev/null | head -1)
+        echo "report_path=${REPORT:-}" >> $GITHUB_OUTPUT
+
+    - name: 上传安全报告
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-report
+        path: ${{ inputs.output-dir }}/
+        retention-days: 30

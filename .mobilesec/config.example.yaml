@@ -1,0 +1,24 @@
+# MobileSec Agent 配置文件
+# 放置于项目根目录: .mobilesec/config.yaml
+
+backend:
+  framework: fastapi           # django | flask | fastapi
+  source_dir: ./backend        # Python 后端代码目录
+  api_base_url: ""             # API 测试地址（留空则跳过 DAST 阶段）
+                               # 可通过环境变量 MOBILESEC_API_URL 覆盖
+
+mobile:
+  framework: react-native      # react-native | flutter | uniapp
+  source_dir: ./mobile         # 移动端代码目录
+  platforms:                   # 目标平台
+    - android
+    - ios
+
+auth:
+  type: jwt                    # jwt | oauth | api-key | session
+  token_env_var: AUTH_TOKEN    # 从环境变量读取认证 Token
+
+pipeline:
+  skip_stages: []              # 跳过的阶段 (dependency | sast | dast | mobile)
+  aboutsecurity_path: ""       # AboutSecurity 知识库路径
+                               # 可通过环境变量 ABOUTSECURITY_PATH 覆盖
