@@ -1,5 +1,19 @@
 # AutoSec for Mobile
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776ab?logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/CI--CD-GitHub_Actions-2088FF?logo=github-actions" alt="CI/CD">
+  <img src="https://img.shields.io/badge/Security-DevSecOps-red" alt="Security">
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT">
+  <img src="https://img.shields.io/github/stars/wwxxzz666/AutoSec-for-Mobile?style=social" alt="Stars">
+</p>
+
+<p align="center">
+  <b>Automated mobile app security scanning agent — dependency audit, SAST, API testing, and mobile-specific checks in one CI/CD pipeline.</b>
+</p>
+
+---
+
 移动应用安全扫描 Agent，集成 GitHub Actions CI/CD，基于 [AboutSecurity](https://github.com/wgpsec/AboutSecurity) 知识库驱动，帮助团队在开发流程中持续保障移动应用安全。
 
 ## 它能做什么
