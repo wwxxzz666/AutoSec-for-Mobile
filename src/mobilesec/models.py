@@ -46,6 +46,7 @@ class StageResult(BaseModel):
 
     stage: StageName
     success: bool = True
+    skipped: bool = False
     findings: list[Finding] = Field(default_factory=list)
     error: Optional[str] = None
     duration_seconds: float = 0.0

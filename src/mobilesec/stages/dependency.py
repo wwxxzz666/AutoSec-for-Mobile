@@ -18,13 +18,20 @@ logger = logging.getLogger(__name__)
 def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     """执行依赖审计"""
     findings: list[Finding] = []
+    backend_dir = Path(config.backend.source_dir)
+    mobile_dir = Path(config.mobile.source_dir)
+    if not backend_dir.exists() and not mobile_dir.exists():
+        return StageResult(
+            stage=StageName.DEPENDENCY,
+            success=True,
+            skipped=True,
+            error="backend and mobile source directories are missing",
+        )
 
     # 1. Trivy 文件系统扫描（覆盖多语言依赖）
-    backend_dir = Path(config.backend.source_dir)
     if backend_dir.exists():
         findings.extend(trivy.run(str(backend_dir)))
 
-    mobile_dir = Path(config.mobile.source_dir)
     if mobile_dir.exists():
         findings.extend(trivy.run(str(mobile_dir)))
 

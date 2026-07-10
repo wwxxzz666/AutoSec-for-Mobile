@@ -42,8 +42,8 @@ runs:
     - name: 安装 Python 依赖
       shell: bash
       run: |
-        pip install semgrep bandit trivy-pip 2>/dev/null || true
-        pip install -e ${{ github.action_path }} 2>/dev/null || pip install pyyaml pydantic rich jinja2
+        python -m pip install semgrep bandit
+        python -m pip install -e "${{ github.action_path }}"
 
     - name: 安装安全工具
       shell: bash
@@ -62,20 +62,24 @@ runs:
     - name: 执行安全扫描
       id: scan
       shell: bash
+      env:
+        PROJECT_ROOT: ${{ inputs.project-root }}
+        CONFIG_PATH: ${{ inputs.config-path }}
+        STAGES: ${{ inputs.stages }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        ABOUTSECURITY_PATH: ${{ inputs.aboutsecurity-path }}
+        FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
       run: |
-        ARGS="--project-root ${{ inputs.project-root }}"
-        ARGS="$ARGS --config ${{ inputs.config-path }}"
-        ARGS="$ARGS --stages ${{ inputs.stages }}"
-        ARGS="$ARGS --output ${{ inputs.output-dir }}"
+        ARGS=(--project-root "$PROJECT_ROOT" --config "$CONFIG_PATH" --stages "$STAGES" --output "$OUTPUT_DIR")
 
-        if [ -n "${{ inputs.aboutsecurity-path }}" ]; then
-          ARGS="$ARGS --aboutsecurity-path ${{ inputs.aboutsecurity-path }}"
+        if [ -n "$ABOUTSECURITY_PATH" ]; then
+          ARGS+=(--aboutsecurity-path "$ABOUTSECURITY_PATH")
         fi
 
-        if python -m mobilesec.cli $ARGS; then
+        if python -m mobilesec.cli "${ARGS[@]}"; then
           echo "scan_result=success" >> $GITHUB_OUTPUT
         else
-          if [ "${{ inputs.fail-on-critical }}" = "true" ]; then
+          if [ "$FAIL_ON_CRITICAL" = "true" ]; then
             echo "::error::发现严重或高危漏洞，请查看安全报告"
             exit 1
           else

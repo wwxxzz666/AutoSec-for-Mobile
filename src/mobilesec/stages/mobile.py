@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from mobilesec.config import ScanConfig
@@ -22,6 +23,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
         return StageResult(
             stage=StageName.MOBILE,
             success=True,
+            skipped=True,
             findings=[],
             error=f"移动端代码目录不存在: {mobile_dir}",
         )
@@ -29,7 +31,18 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     # 1. MobSF 静态安全检查（不依赖 MobSF 服务）
     findings.extend(mobsf.run_static_checks(str(mobile_dir)))
 
-    # 2. 框架专项检查
+    # Optional MobSF remote analysis.
+    if config.mobile.mobsf_url:
+        api_key = os.environ.get(config.mobile.mobsf_api_key_env_var, "")
+        for platform in config.mobile.platforms:
+            findings.extend(mobsf.run_source_scan(
+                str(mobile_dir),
+                platform=platform,
+                mobsf_url=config.mobile.mobsf_url,
+                api_key=api_key,
+            ))
+
+    # 3. 框架专项检查
     framework = config.mobile.framework
     if framework == "react-native":
         findings.extend(_check_react_native(mobile_dir))

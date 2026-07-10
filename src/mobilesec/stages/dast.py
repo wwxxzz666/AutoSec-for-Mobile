@@ -23,6 +23,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
         return StageResult(
             stage=StageName.DAST,
             success=True,
+            skipped=True,
             findings=[],
             error="未配置 API 地址，跳过 DAST 阶段",
         )

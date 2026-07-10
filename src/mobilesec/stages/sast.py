@@ -19,6 +19,13 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
 
     backend_dir = Path(config.backend.source_dir)
     mobile_dir = Path(config.mobile.source_dir)
+    if not backend_dir.exists() and not mobile_dir.exists():
+        return StageResult(
+            stage=StageName.SAST,
+            success=True,
+            skipped=True,
+            error="?????????????????????",
+        )
 
     # 1. Semgrep 多语言扫描
     if backend_dir.exists():

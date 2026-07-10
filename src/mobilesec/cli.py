@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -69,7 +70,7 @@ def main() -> None:
 
     # 加载配置
     project_root = Path(args.project_root).resolve()
-    config = ScanConfig.load(project_root)
+    config = ScanConfig.load(project_root, args.config)
 
     # AboutSecurity 知识库路径: CLI 参数 > 配置文件 > 环境变量
     as_path = args.aboutsecurity_path or config.pipeline.aboutsecurity_path
@@ -157,10 +158,18 @@ def main() -> None:
     for sev, count in summary.items():
         if count > 0:
             logger.info("  %s: %d", sev.upper(), count)
+
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as output:
+            output.write(f"report_path={report_path}\n")
+            output.write(f"total_findings={total}\n")
+
     logger.info("=" * 60)
 
-    # 严重/高危漏洞退出码为 1
-    if has_critical:
+    # Exit with status 1 for critical findings or stage failures.
+    has_stage_error = any(not result.success for result in scan_report.results)
+    if has_critical or has_stage_error:
         logger.error("发现严重或高危漏洞，请立即修复！")
         sys.exit(1)
 

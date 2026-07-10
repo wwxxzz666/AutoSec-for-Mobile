@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from mobilesec.models import Finding, Severity, StageName
@@ -13,61 +14,94 @@ logger = logging.getLogger(__name__)
 
 
 class MobSFClient:
-    """MobSF REST API 客户端"""
+    """MobSF REST client using upload -> scan -> report_json."""
 
     def __init__(self, server_url: str = "http://localhost:8000", api_key: str = ""):
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
 
     def _request(self, method: str, endpoint: str, data: dict | None = None) -> dict | None:
-        """发送 HTTP 请求到 MobSF"""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.server_url}/api/v1/{endpoint}"
-        headers = {"X-Mobsf-Api-Key": self.api_key, "Authorization": self.api_key}
+        headers = {"X-Mobsf-Api-Key": self.api_key}
         body = None
-        if data:
-            body = json.dumps(data).encode()
+        if data is not None:
+            body = json.dumps(data).encode("utf-8")
             headers["Content-Type"] = "application/json"
-
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
-                return json.loads(resp.read())
-        except urllib.error.URLError as e:
-            logger.error("MobSF 请求失败: %s", e)
-            return None
-        except Exception as e:
-            logger.error("MobSF 错误: %s", e)
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+            logger.error("MobSF request failed: %s", exc)
             return None
 
-    def scan_apk(self, file_path: str) -> dict | None:
-        """上传并扫描 APK"""
-        return self._request("POST", "android scan", {"file": file_path})
+    def upload_and_scan(self, file_path: str, scan_type: str) -> dict | None:
+        import mimetypes
+        import urllib.request
+        import uuid
 
-    def scan_ipa(self, file_path: str) -> dict | None:
-        """上传并扫描 IPA"""
-        return self._request("POST", "ios scan", {"file": file_path})
+        path = Path(file_path)
+        boundary = f"----mobilesec-{uuid.uuid4().hex}"
+        filename = path.name
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode() + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            f"{self.server_url}/api/v1/upload",
+            data=body,
+            headers={
+                "X-Mobsf-Api-Key": self.api_key,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                uploaded = json.loads(resp.read().decode("utf-8"))
+            if not uploaded.get("hash"):
+                return None
+            scan = self._request("POST", "scan", {
+                "hash": uploaded["hash"],
+                "scan_type": scan_type,
+                "file_name": uploaded.get("file_name", filename),
+            })
+            if not scan:
+                return None
+            return self._request("POST", "report_json", {"hash": uploaded["hash"]}) or scan
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.error("MobSF upload or scan failed: %s", exc)
+            return None
 
-    def scan_source(self, file_path: str, platform: str = "android") -> dict | None:
-        """扫描源码"""
-        endpoint = "android scan" if platform == "android" else "ios scan"
-        return self._request("POST", endpoint, {"file": file_path})
 
-
-def run_source_scan(source_dir: str, platform: str = "android", mobsf_url: str = "") -> list[Finding]:
-    """通过 MobSF 进行源码扫描"""
-    if not mobsf_url:
-        logger.info("未配置 MobSF 地址，跳过移动端动态分析")
+def run_source_scan(
+    source_dir: str,
+    platform: str = "android",
+    mobsf_url: str = "",
+    api_key: str = "",
+) -> list[Finding]:
+    """Scan a source directory with MobSF when URL and key are configured."""
+    if not mobsf_url or not api_key:
+        logger.info("MobSF URL or API key is missing; remote analysis skipped")
         return []
 
-    client = MobSFClient(mobsf_url)
-    result = client.scan_source(source_dir, platform)
-    if not result:
-        return []
+    import tempfile
+    import zipfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        archive = Path(temp_dir) / "mobilesec-source.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            root = Path(source_dir)
+            for file in root.rglob("*"):
+                if file.is_file() and not any(part in {"node_modules", ".git", "build", "dist"} for part in file.parts):
+                    bundle.write(file, file.relative_to(root))
+        result = MobSFClient(mobsf_url, api_key).upload_and_scan(str(archive), "zip")
 
-    return _parse_mobsf_result(result)
+    return _parse_mobsf_result(result or {})
 
 
 def run_static_checks(source_dir: str) -> list[Finding]:

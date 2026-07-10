@@ -69,8 +69,13 @@ def _render_markdown(report: ScanReport, config: ScanConfig) -> str:
 
         sections.append(f"## {stage_name}\n")
 
+        if stage_result.skipped:
+            sections.append("> SKIPPED: stage was skipped.\n")
+        elif not stage_result.success:
+            sections.append("> FAILED: stage execution failed.\n")
+
         if stage_result.error:
-            sections.append(f"> ⚠️ {stage_result.error}\n")
+            sections.append(f"> ERROR: {stage_result.error}\n")
 
         if not stage_result.findings:
             sections.append("未发现问题。\n")
