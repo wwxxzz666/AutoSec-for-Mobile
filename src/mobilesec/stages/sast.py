@@ -24,7 +24,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
             stage=StageName.SAST,
             success=True,
             skipped=True,
-            error="?????????????????????",
+            error="后端与移动端代码目录均不存在，跳过静态分析阶段",
         )
 
     # 1. Semgrep 多语言扫描
