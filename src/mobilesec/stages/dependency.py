@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
-from mobilesec.models import Finding, Severity, StageName, StageResult
+from mobilesec.models import Finding, Severity, StageName, StageResult, dedupe_findings
 from mobilesec.tools import trivy
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,10 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
         findings.extend(_match_known_vulns(config, kb))
 
     # 去重（相同 CVE 不重复报）
-    seen_cves = set()
-    unique = []
-    for f in findings:
-        key = f.cve_id or f"{f.title}:{f.file_path}:{f.line_number}"
-        if key not in seen_cves:
-            seen_cves.add(key)
-            unique.append(f)
+    unique = dedupe_findings(
+        findings,
+        key=lambda f: f.cve_id or (f.title, f.file_path, f.line_number),
+    )
 
     return StageResult(
         stage=StageName.DEPENDENCY,

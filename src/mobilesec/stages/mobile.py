@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
-from mobilesec.models import Finding, Severity, StageName, StageResult
+from mobilesec.models import Finding, Severity, StageName, StageResult, dedupe_findings
 from mobilesec.tools import mobsf
 
 logger = logging.getLogger(__name__)
@@ -75,14 +75,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     findings.extend(_check_android_manifest(mobile_dir))
     findings.extend(_check_ios_plist(mobile_dir))
 
-    # 去重
-    seen = set()
-    unique = []
-    for f in findings:
-        key = f"{f.title}:{f.file_path}:{f.line_number}"
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
+    unique = dedupe_findings(findings)
 
     logger.info("移动端安全测试发现 %d 个问题", len(unique))
     return StageResult(stage=StageName.MOBILE, success=True, findings=unique)

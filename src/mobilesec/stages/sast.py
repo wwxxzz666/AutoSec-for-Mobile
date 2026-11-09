@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
-from mobilesec.models import Finding, Severity, StageName, StageResult
+from mobilesec.models import Finding, Severity, StageName, StageResult, dedupe_findings
 from mobilesec.tools import bandit, semgrep
 
 logger = logging.getLogger(__name__)
@@ -46,14 +46,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     if backend_dir.exists():
         findings.extend(_check_framework_security(backend_dir, config.backend.framework))
 
-    # 去重
-    seen = set()
-    unique = []
-    for f in findings:
-        key = f"{f.title}:{f.file_path}:{f.line_number}"
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
+    unique = dedupe_findings(findings)
 
     logger.info("SAST 共发现 %d 个问题", len(unique))
     return StageResult(stage=StageName.SAST, success=True, findings=unique)
