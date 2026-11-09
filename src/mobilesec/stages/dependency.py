@@ -90,7 +90,7 @@ def _run_pip_audit(source_dir: str) -> list[Finding]:
                     description=vuln.get("description", ""),
                     package=vuln.get("package", {}).get("name"),
                     fix_version=", ".join(vuln.get("fix_versions", [])),
-                    cve_id=vuln.get("aliases", [None])[0],
+                    cve_id=(vuln.get("aliases") or [None])[0],
                     remediation=f"更新到修复版本: {', '.join(vuln.get('fix_versions', ['未知']))}",
                 ))
         except Exception as e:
