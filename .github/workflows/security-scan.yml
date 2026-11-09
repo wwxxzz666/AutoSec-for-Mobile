@@ -18,6 +18,7 @@ jobs:
     permissions:
       issues: write
       contents: read
+      security-events: write   # 上传 SARIF 到 Code Scanning 需要
 
     steps:
       - name: Checkout 代码
@@ -45,7 +46,15 @@ jobs:
           project-root: "."
           aboutsecurity-path: "./aboutsecurity"
           stages: ${{ github.event.inputs.stages || 'dependency,sast,mobile' }}
+          report-format: "both"
           fail-on-critical: "true"
+
+      - name: 上传 SARIF 到 Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-reports/
+          category: mobilesec
 
       - name: 检查报告
         if: always()

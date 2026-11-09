@@ -23,6 +23,10 @@ inputs:
     description: "报告输出目录"
     required: false
     default: "./security-reports"
+  report-format:
+    description: "报告格式: markdown | sarif | both（sarif 可直接上传 GitHub Code Scanning）"
+    required: false
+    default: "markdown"
   fail-on-critical:
     description: "发现严重漏洞时是否失败"
     required: false
@@ -35,6 +39,9 @@ outputs:
   total-findings:
     description: "发现的安全问题总数"
     value: ${{ steps.scan.outputs.total_findings }}
+  sarif-path:
+    description: "生成的 SARIF 报告路径（report-format 为 sarif/both 时）"
+    value: ${{ steps.scan.outputs.sarif_path }}
 
 runs:
   using: "composite"
@@ -67,10 +74,11 @@ runs:
         CONFIG_PATH: ${{ inputs.config-path }}
         STAGES: ${{ inputs.stages }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
+        REPORT_FORMAT: ${{ inputs.report-format }}
         ABOUTSECURITY_PATH: ${{ inputs.aboutsecurity-path }}
         FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
       run: |
-        ARGS=(--project-root "$PROJECT_ROOT" --config "$CONFIG_PATH" --stages "$STAGES" --output "$OUTPUT_DIR")
+        ARGS=(--project-root "$PROJECT_ROOT" --config "$CONFIG_PATH" --stages "$STAGES" --output "$OUTPUT_DIR" --format "$REPORT_FORMAT")
 
         if [ -n "$ABOUTSECURITY_PATH" ]; then
           ARGS+=(--aboutsecurity-path "$ABOUTSECURITY_PATH")
@@ -90,6 +98,8 @@ runs:
         # 输出报告路径
         REPORT=$(ls -t ${{ inputs.output-dir }}/security-report-*.md 2>/dev/null | head -1)
         echo "report_path=${REPORT:-}" >> $GITHUB_OUTPUT
+        SARIF=$(ls -t ${{ inputs.output-dir }}/security-report-*.sarif 2>/dev/null | head -1)
+        echo "sarif_path=${SARIF:-}" >> $GITHUB_OUTPUT
 
     - name: 上传安全报告
       if: always()
