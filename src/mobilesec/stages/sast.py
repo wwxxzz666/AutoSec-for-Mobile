@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
-from mobilesec.models import Finding, Severity, StageName, StageResult
+from mobilesec.models import Finding, Severity, StageName, StageResult, dedupe_findings
 from mobilesec.tools import bandit, semgrep
 
 logger = logging.getLogger(__name__)
@@ -45,59 +46,61 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     if backend_dir.exists():
         findings.extend(_check_framework_security(backend_dir, config.backend.framework))
 
-    # 去重
-    seen = set()
-    unique = []
-    for f in findings:
-        key = f"{f.title}:{f.file_path}:{f.line_number}"
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
+    unique = dedupe_findings(findings)
 
     logger.info("SAST 共发现 %d 个问题", len(unique))
     return StageResult(stage=StageName.SAST, success=True, findings=unique)
 
 
+# 预编译一次，避免每次扫描重复解析正则
+_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r'(?i)(API_KEY|SECRET_KEY|PRIVATE_KEY|ACCESS_TOKEN)\s*[=:]\s*["\'][^"\']{8,}'), "硬编码密钥"),
+    (re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*["\'][^"\']{4,}'), "硬编码密码"),
+    (re.compile(r'-----BEGIN (RSA |EC )?PRIVATE KEY-----'), "硬编码私钥"),
+    (re.compile(r'(?i)mongodb(\+srv)?://[^\s"\']+'), "硬编码数据库连接串"),
+    (re.compile(r'(?i)mysql://[^\s"\']+'), "硬编码数据库连接串"),
+    (re.compile(r'(?i)redis://[^\s"\']+:'), "硬编码 Redis 连接串"),
+]
+
+_SECRET_FILE_SUFFIXES = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".dart", ".vue",
+    ".env", ".yaml", ".yml", ".json", ".toml", ".cfg", ".ini",
+}
+
+_SKIP_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", "dist", "build", ".gradle"}
+
+
 def _check_secrets(root: Path) -> list[Finding]:
-    """检查硬编码的敏感信息"""
-    import re
+    """检查硬编码的敏感信息。
 
-    patterns = [
-        (r'(?i)(API_KEY|SECRET_KEY|PRIVATE_KEY|ACCESS_TOKEN)\s*[=:]\s*["\'][^"\']{8,}', "硬编码密钥"),
-        (r'(?i)(password|passwd|pwd)\s*[=:]\s*["\'][^"\']{4,}', "硬编码密码"),
-        (r'-----BEGIN (RSA |EC )?PRIVATE KEY-----', "硬编码私钥"),
-        (r'(?i)mongodb(\+srv)?://[^\s"\']+', "硬编码数据库连接串"),
-        (r'(?i)mysql://[^\s"\']+', "硬编码数据库连接串"),
-        (r'(?i)redis://[^\s"\']+:', "硬编码 Redis 连接串"),
-    ]
-
-    findings = []
-    extensions = {".py", ".js", ".ts", ".jsx", ".tsx", ".dart", ".vue", ".env", ".yaml", ".yml", ".json", ".toml", ".cfg", ".ini"}
-
-    skip_dirs = {"node_modules", ".git", "venv", ".venv", "__pycache__", "dist", "build", ".gradle"}
+    逐行扫描而不是整文件正则 + 回数换行符：后者对每个命中都要
+    content[:match.start()].count("\n")，是 O(文件大小 × 命中数)，
+    大仓库上会明显拖慢扫描；同时每行最多产出一条发现，去掉重复。
+    """
+    findings: list[Finding] = []
 
     for fp in root.rglob("*"):
-        if any(d in fp.parts for d in skip_dirs):
+        if any(d in fp.parts for d in _SKIP_DIRS):
             continue
-        if fp.suffix not in extensions:
+        if fp.suffix not in _SECRET_FILE_SUFFIXES:
             continue
 
         try:
-            content = fp.read_text(encoding="utf-8", errors="ignore")
+            lines = fp.read_text(encoding="utf-8", errors="ignore").splitlines()
         except Exception:
             continue
 
-        for pattern, title in patterns:
-            for match in re.finditer(pattern, content):
-                line_num = content[:match.start()].count("\n") + 1
-                findings.append(Finding(
-                    stage=StageName.SAST,
-                    severity=Severity.HIGH,
-                    title=f"硬编码敏感信息: {title}",
-                    file_path=str(fp),
-                    line_number=line_num,
-                    remediation="将敏感信息移至环境变量或密钥管理服务",
-                ))
+        for line_num, line in enumerate(lines, 1):
+            for pattern, title in _SECRET_PATTERNS:
+                if pattern.search(line):
+                    findings.append(Finding(
+                        stage=StageName.SAST,
+                        severity=Severity.HIGH,
+                        title=f"硬编码敏感信息: {title}",
+                        file_path=str(fp),
+                        line_number=line_num,
+                        remediation="将敏感信息移至环境变量或密钥管理服务",
+                    ))
 
     return findings
 

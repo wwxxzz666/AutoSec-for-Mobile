@@ -2,16 +2,36 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
-from mobilesec.models import Finding, Severity, StageName, StageResult
+from mobilesec.models import Finding, Severity, StageName, StageResult, dedupe_findings
 from mobilesec.tools import mobsf
 
 logger = logging.getLogger(__name__)
+
+
+def _attr_is_true(content: str, attr: str) -> bool:
+    """判断某个属性是否被显式设为 true。
+
+    旧实现用 `"true" in content` 判断，文件里任意位置出现 true
+    （比如 android:exported="true"）都会命中，产生 HIGH/MEDIUM 误报。
+    这里要求 attr 与 true 紧邻出现，兼容：
+       attr="true"   attr='true'   attr: true   attr = true
+    """
+    pattern = rf"{re.escape(attr)}\s*[=:]\s*['\"]?true['\"]?"
+    return re.search(pattern, content, re.IGNORECASE) is not None
+
+
+def _plist_key_is_true(content: str, key: str) -> bool:
+    """plist 里 <key>KEY</key><true/> 形式的布尔值判断。"""
+    pattern = rf"<key>\s*{re.escape(key)}\s*</key>\s*<true\s*/>"
+    return re.search(pattern, content, re.IGNORECASE) is not None
 
 
 def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
@@ -55,14 +75,7 @@ def run(config: ScanConfig, kb: KnowledgeBase | None = None) -> StageResult:
     findings.extend(_check_android_manifest(mobile_dir))
     findings.extend(_check_ios_plist(mobile_dir))
 
-    # 去重
-    seen = set()
-    unique = []
-    for f in findings:
-        key = f"{f.title}:{f.file_path}:{f.line_number}"
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
+    unique = dedupe_findings(findings)
 
     logger.info("移动端安全测试发现 %d 个问题", len(unique))
     return StageResult(stage=StageName.MOBILE, success=True, findings=unique)
@@ -78,7 +91,7 @@ def _check_react_native(root: Path) -> list[Finding]:
         nsc_files = list(android_dir.rglob("network_security_config.xml"))
         for nsc in nsc_files:
             content = nsc.read_text(encoding="utf-8", errors="ignore")
-            if "cleartextTrafficPermitted" in content and "true" in content.lower():
+            if _attr_is_true(content, "cleartextTrafficPermitted"):
                 findings.append(Finding(
                     stage=StageName.MOBILE,
                     severity=Severity.HIGH,
@@ -96,7 +109,7 @@ def _check_react_native(root: Path) -> list[Finding]:
         except Exception:
             continue
 
-        if "javaScriptEnabled=true" in content or "javaScriptEnabled: true" in content:
+        if _attr_is_true(content, "javaScriptEnabled"):
             if "onMessage" not in content and "injectedJavaScript" not in content:
                 findings.append(Finding(
                     stage=StageName.MOBILE,
@@ -106,7 +119,7 @@ def _check_react_native(root: Path) -> list[Finding]:
                     remediation="配置 WebView 的 onMessage 或 injectedJavaScript",
                 ))
 
-        if "allowFileAccess" in content and "true" in content:
+        if _attr_is_true(content, "allowFileAccess"):
             findings.append(Finding(
                 stage=StageName.MOBILE,
                 severity=Severity.MEDIUM,
@@ -267,7 +280,7 @@ def _check_ios_plist(root: Path) -> list[Finding]:
             continue
 
         # 检查 ATS
-        if "NSAllowsArbitraryLoads" in content:
+        if _plist_key_is_true(content, "NSAllowsArbitraryLoads"):
             findings.append(Finding(
                 stage=StageName.MOBILE,
                 severity=Severity.HIGH,

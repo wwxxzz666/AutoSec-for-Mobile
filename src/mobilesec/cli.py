@@ -12,6 +12,7 @@ from pathlib import Path
 from mobilesec.config import ScanConfig
 from mobilesec.knowledge import KnowledgeBase
 from mobilesec.models import ScanReport, StageName
+from mobilesec.sarif import run as run_sarif
 from mobilesec.stages import dast, dependency, mobile, report, sast
 
 logger = logging.getLogger("mobilesec")
@@ -43,6 +44,12 @@ def main() -> None:
         "--output", "-o",
         default="./security-reports",
         help="报告输出目录 (默认: ./security-reports)",
+    )
+    parser.add_argument(
+        "--format", "-f",
+        default="markdown",
+        choices=["markdown", "sarif", "both"],
+        help="报告格式 (默认: markdown)。sarif 可直接上传 GitHub Code Scanning",
     )
     parser.add_argument(
         "--stages", "-s",
@@ -147,8 +154,14 @@ def main() -> None:
 
     # 生成报告
     logger.info("-" * 40)
-    report_path = report.run(scan_report, config, args.output)
-    logger.info("报告已生成: %s", report_path)
+    report_path = ""
+    sarif_path = ""
+    if args.format in ("markdown", "both"):
+        report_path = report.run(scan_report, config, args.output)
+        logger.info("Markdown 报告已生成: %s", report_path)
+    if args.format in ("sarif", "both"):
+        sarif_path = run_sarif(scan_report, args.output, project_root)
+        logger.info("SARIF 报告已生成: %s", sarif_path)
 
     # 汇总
     total = len(scan_report.all_findings)
@@ -163,6 +176,7 @@ def main() -> None:
     if github_output:
         with open(github_output, "a", encoding="utf-8") as output:
             output.write(f"report_path={report_path}\n")
+            output.write(f"sarif_path={sarif_path}\n")
             output.write(f"total_findings={total}\n")
 
     logger.info("=" * 60)

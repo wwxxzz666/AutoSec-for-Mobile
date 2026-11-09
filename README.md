@@ -101,7 +101,31 @@ mobilesec --stages dependency,sast
 
 # 详细日志
 mobilesec -v
+
+# 同时输出 Markdown 和 SARIF（SARIF 可上传 GitHub Code Scanning）
+mobilesec --format both
 ```
+
+### 报告格式
+
+| `--format` | 产物 | 用途 |
+|-----------|------|------|
+| `markdown`（默认） | `security-report-*.md` | 人工阅读、贴进 Issue / Step Summary |
+| `sarif` | `security-report-*.sarif` | 上传 GitHub Code Scanning |
+| `both` | 两份都生成 | CI 推荐 |
+
+SARIF 的好处：发现会直接标注在 PR 的 diff 行上，并进入仓库的
+**Security → Code scanning** 面板，能配合分支保护规则拦截高危提交。
+
+```yaml
+- name: 上传 SARIF
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: security-reports/
+```
+
+> 用 SARIF 上传需要 workflow 具备 `permissions: security-events: write`。
 
 ### 4. GitHub Actions 集成
 
