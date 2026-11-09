@@ -142,34 +142,38 @@ def _run_npm_audit(source_dir: str) -> list[Finding]:
         return []
 
 
-def _match_known_vulns(config: ScanConfig, kb: KnowledgeBase) -> list[Finding]:
-    """从 AboutSecurity Vuln/ 数据库匹配已知漏洞"""
-    findings = []
+SEVERITY_MAP = {
+    "CRITICAL": Severity.CRITICAL,
+    "HIGH": Severity.HIGH,
+    "MEDIUM": Severity.MEDIUM,
+    "LOW": Severity.LOW,
+}
 
-    # 根据后端框架匹配
-    framework_map = {
-        "django": "django",
-        "flask": "flask",
-        "fastapi": "fastapi",
-        "uvicorn": "uvicorn",
-    }
-    for framework in [config.backend.framework] + list(framework_map.keys()):
-        entries = kb.search_vulns(product=framework)
-        for entry in entries[:10]:  # 限制数量
-            severity_map = {
-                "CRITICAL": Severity.CRITICAL,
-                "HIGH": Severity.HIGH,
-                "MEDIUM": Severity.MEDIUM,
-                "LOW": Severity.LOW,
-            }
-            findings.append(Finding(
-                stage=StageName.DEPENDENCY,
-                severity=severity_map.get(entry.severity, Severity.INFO),
-                title=entry.title,
-                cve_id=entry.id,
-                description=f"产品 {entry.product} 存在已知漏洞",
-                remediation="查看漏洞详情获取修复建议",
-                references=[str(entry.path)],
-            ))
+
+def _match_known_vulns(config: ScanConfig, kb: KnowledgeBase) -> list[Finding]:
+    """从 AboutSecurity Vuln/ 数据库匹配已知漏洞。
+
+    只搜项目实际使用的后端框架。旧实现里
+        for framework in [config.backend.framework] + list(framework_map.keys())
+    把 django/flask/fastapi/uvicorn 四个框架全都搜一遍（而 framework_map
+    是键值相同的恒等映射，值从未被使用）。结果是任何项目都会拿到
+    另外三个框架的漏洞，纯噪声。
+    """
+    findings: list[Finding] = []
+
+    framework = (config.backend.framework or "").strip().lower()
+    if not framework:
+        return findings
+
+    for entry in kb.search_vulns(product=framework)[:10]:  # 限制数量
+        findings.append(Finding(
+            stage=StageName.DEPENDENCY,
+            severity=SEVERITY_MAP.get(entry.severity, Severity.INFO),
+            title=entry.title,
+            cve_id=entry.id,
+            description=f"产品 {entry.product} 存在已知漏洞",
+            remediation="查看漏洞详情获取修复建议",
+            references=[str(entry.path)],
+        ))
 
     return findings
