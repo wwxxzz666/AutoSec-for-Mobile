@@ -120,15 +120,27 @@ def _run_sqli_tests(endpoints: list[dict], base_url: str, token: str) -> list[Fi
 
 def _run_auth_tests(base_url: str, config: ScanConfig, token: str) -> list[Finding]:
     """测试认证与授权"""
-    import urllib.request
-    import urllib.error
+    findings: list[Finding] = []
 
-    findings = []
+    # CORS 检查不依赖认证 token，必须放在 token 守卫之前，
+    # 否则未配置 token 的项目根本不会被检查（旧 bug）。
+    findings.extend(_check_cors(base_url))
 
+    # 后面的"无 token 访问"测试需要先知道一个合法 token 才能对比，
+    # 没配 token 就跳过。
     if not token:
         return findings
 
-    # 测试: 无 Token 访问
+    findings.extend(_check_unauthenticated_access(base_url))
+    return findings
+
+
+def _check_unauthenticated_access(base_url: str) -> list[Finding]:
+    """测试不带认证信息能否访问 API"""
+    import urllib.error
+    import urllib.request
+
+    findings: list[Finding] = []
     try:
         req = urllib.request.Request(base_url)
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -148,7 +160,14 @@ def _run_auth_tests(base_url: str, config: ScanConfig, token: str) -> list[Findi
     except Exception:
         pass
 
-    # 测试: CORS 配置
+    return findings
+
+
+def _check_cors(base_url: str) -> list[Finding]:
+    """测试 CORS 配置是否过于宽松"""
+    import urllib.request
+
+    findings: list[Finding] = []
     try:
         req = urllib.request.Request(base_url)
         req.add_header("Origin", "https://evil.com")
